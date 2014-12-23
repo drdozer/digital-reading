@@ -1,11 +1,12 @@
 package uk.co.turingatemyhamster.digitalReading.web
 
+import spray.routing.directives.OnSuccessFutureMagnet
 import uk.co.turingatemyhamster.digitalReading.corpus.{OnDiskStoryDB, StoryDB}
 
-import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.ExecutionContext
 import akka.actor.ActorSystem
 import spray.http.{StatusCodes, MediaTypes}
-import spray.routing.SimpleRoutingApp
+import spray.routing._
 
 import scala.util.{Failure, Success}
 
@@ -18,6 +19,14 @@ object DrServer extends App with SimpleRoutingApp with StaticContent with RestAp
 
   implicit val system = ActorSystem("dr-server")
 
+  override implicit val ec = ExecutionContext.Implicits.global
+
+  override val corpus = StoryDB.cache(OnDiskStoryDB(args.head))
+
+  println("Initializing corpus db")
+  corpus.allMeanStdev
+
+  println("Starting server")
   startServer(interface = "localhost", port = 9300) {
     get {
       respondWithMediaType(MediaTypes.`text/html`) {
@@ -38,17 +47,26 @@ object DrServer extends App with SimpleRoutingApp with StaticContent with RestAp
               }
           }
       } ~
-      pathPrefix("api") {
-        path("stories") {
-          complete(`api/stories`)
-        }
-      }
-    } ~
-      respondWithMediaType(MediaTypes.`application/json`) {
-        pathPrefix("public") {
-          get {
-            getFromResourceDirectory("public")
+        pathPrefix("api") {
+          respondWithMediaType(MediaTypes.`application/json`) {
+            path("stories") {
+              complete(`api/stories`)
+            } ~
+              path("chapter_word_counts" / LongNumber / Segment ) { (chapterId: Long, preserveCase : String) =>
+                complete(`api/chapter_word_counts`(chapterId, preserveCase == "true"))
+              } ~
+              path("all_word_counts" / Segment) { (preserveCase: String) =>
+                complete(`api/all_word_counts`(preserveCase == "true"))
+              } ~
+              path("all_mean_stdev") {
+                complete(`api/all_mean_stdev`)
+              }
           }
+        }
+    } ~
+      pathPrefix("public") {
+        get {
+          getFromResourceDirectory("public")
         }
       }
   }.onComplete {
@@ -58,6 +76,4 @@ object DrServer extends App with SimpleRoutingApp with StaticContent with RestAp
       println(ex.getMessage)
       system.shutdown()
   }
-
-  override def corpus = StoryDB.cache(OnDiskStoryDB(args.head))
 }

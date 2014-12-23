@@ -23,6 +23,9 @@ object OnDiskStoryDB {
         tags = tags.split("""\s+""").to[List],
         title = title)
     }
+
+    val storyById = (storyList map { s => s.storyId -> s }).toMap
+
     val allMetaData = Stories(storyList)
 
     def chapterFile(chapterId: Long): File = new File(s"$dirRoot/chapter_text/$chapterId")
@@ -53,6 +56,22 @@ object OnDiskStoryDB {
         counts reduce (_ merge _)
       }
 
+      override def storyWordCounts(storyId: Long, preserveCase: Boolean) = {
+        val counts = for(
+          chapterId <- storyById(storyId).chapterIds
+        ) yield chapterWordCounts(chapterId, preserveCase)
+
+        counts reduce (_ merge _)
+      }
+
+      override def storyMeanStdev(storyId: Long) = {
+        val counts = for(
+          chapterId <- storyById(storyId).chapterIds
+        ) yield chapterWordCounts(chapterId, false)
+
+        MeanStdev fromCounts counts
+      }
+
       override def allMeanStdev: MeanStdev = meanStdev(all.stories.flatMap(_.chapterIds))
 
       def meanStdev(ids: List[Long]): MeanStdev = {
@@ -63,20 +82,7 @@ object OnDiskStoryDB {
           chapterWordCounts(chapterId, preserveCase = false)
         }
 
-        val freqs = counts.map(_.asFrequencies)
-
-        val n = freqs.length.toDouble
-        val freqsSum = freqs reduce (_ merge _)
-        val means = freqsSum.frequencies.mapValues(_ / n)
-        val stdevs = means.map { case(w, mean) =>
-          val variance = freqs.map { wc =>
-            val d = wc.frequencies.getOrElse(w, 0.0) - mean
-            d * d
-          } .sum / n
-          w -> Math.sqrt(variance)
-        }
-
-        MeanStdev(means = means, stdevs = stdevs)
+        MeanStdev fromCounts counts
       }
     }
   }

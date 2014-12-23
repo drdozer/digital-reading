@@ -25,9 +25,13 @@ object DigitalReadingBuild extends Build {
 
   lazy val core            = drCore.project(corePlatformJvm, corePlatformJs)
   lazy val corePlatformJvm = drCore.jvmProject(coreSharedJvm)
-  lazy val corePlatformJs  = drCore.jsProject(coreSharedJs).settings(corePlatformJsSettings: _*)
-  lazy val coreSharedJvm   = drCore.jvmShared().settings(coreSharedSettingsJvm : _*)
-  lazy val coreSharedJs    = drCore.jsShared(coreSharedJvm).settings(coreSharedSettingsJs : _*)
+    .settings(corePlatformJvmSettings: _*)
+  lazy val corePlatformJs  = drCore.jsProject(coreSharedJs)
+    .settings(corePlatformJsSettings: _*)
+  lazy val coreSharedJvm   = drCore.jvmShared()
+    .settings(coreSharedSettingsJvm : _*)
+  lazy val coreSharedJs    = drCore.jsShared(coreSharedJvm)
+    .settings(coreSharedSettingsJs : _*)
 
   val drClientServer = XModule(id = "dr-clientServer", defaultSettings = buildSettings, baseDir = "dr-clientServer")
 
@@ -77,8 +81,14 @@ object DigitalReadingBuild extends Build {
     )
   )
 
+  lazy val corePlatformJvmSettings = Seq(
+  )
+
   lazy val corePlatformJsSettings = Seq(
     libraryDependencies ++= Seq(
+      "uk.co.turingatemyhamster" %%% "scalatags-ext" % "0.1.3",
+      "uk.co.turingatemyhamster" %%% "sbolv-util" % "0.1.3",
+      "com.scalatags" %%% "scalatags" % "0.4.2",
       "org.scala-lang.modules.scalajs" %%% "scalajs-dom" % "0.6"
     )
   )
@@ -104,9 +114,6 @@ object DigitalReadingBuild extends Build {
 
   lazy val clientServerPlatformJsSettings = Seq(
     libraryDependencies ++= Seq(
-      "uk.co.turingatemyhamster" %%% "scalatags-ext" % "0.1.1",
-      "com.scalatags" %%% "scalatags" % "0.4.2",
-      "org.scala-lang.modules.scalajs" %%% "scalajs-dom" % "0.6"
     )
   )
 

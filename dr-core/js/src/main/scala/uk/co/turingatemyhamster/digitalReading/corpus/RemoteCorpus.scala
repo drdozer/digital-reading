@@ -21,6 +21,14 @@ object RemoteStoryDB {
       for(req <- Ajax.get(url = s"$apiUrl/chapter_word_counts/$chapterId/$preserveCase")) yield
         read[WordCount](req.responseText)
 
+    override def storyWordCounts(storyId: Long, preserveCase: Boolean) =
+      for(req <- Ajax.get(url = s"$apiUrl/story_word_counts/$storyId/$preserveCase")) yield
+        read[WordCount](req.responseText)
+
+    override def storyMeanStdev(storyId: Long) =
+      for(req <- Ajax.get(url = s"$apiUrl/story_meanstdev/$storyId")) yield
+        read[MeanStdev](req.responseText)
+
     override def allWordCounts(preserveCase: Boolean) =
       for(req <- Ajax.get(url = s"$apiUrl/all_word_counts/$preserveCase")) yield
         read[WordCount](req.responseText)
