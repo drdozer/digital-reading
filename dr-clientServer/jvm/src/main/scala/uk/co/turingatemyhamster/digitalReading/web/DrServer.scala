@@ -7,6 +7,8 @@ import scala.concurrent.ExecutionContext
 import akka.actor.ActorSystem
 import spray.http.{StatusCodes, MediaTypes}
 import spray.routing._
+import akka.util.Timeout
+import scala.concurrent.duration._
 
 import scala.util.{Failure, Success}
 
@@ -18,6 +20,8 @@ import scala.util.{Failure, Success}
 object DrServer extends App with SimpleRoutingApp with StaticContent with RestApi with Templates {
 
   implicit val system = ActorSystem("dr-server")
+
+  implicit val timeout: Timeout = Timeout(5 seconds)
 
   override implicit val ec = ExecutionContext.Implicits.global
 
