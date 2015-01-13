@@ -31,7 +31,7 @@ object DrServer extends App with SimpleRoutingApp with StaticContent with RestAp
   corpus.allMeanStdev
 
   println("Starting server")
-  startServer(interface = "localhost", port = 9300) {
+  startServer(interface = "0.0.0.0", port = 9300) {
     get {
       respondWithMediaType(MediaTypes.`text/html`) {
         (path("index.html") | pathSingleSlash) {
