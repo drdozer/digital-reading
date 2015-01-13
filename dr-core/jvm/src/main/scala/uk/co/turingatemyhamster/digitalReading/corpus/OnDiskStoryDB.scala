@@ -32,7 +32,7 @@ object OnDiskStoryDB {
 
     def countWords(text: String, preserveCase: Boolean): Map[String, Int] = {
       val rawWords =
-        if(preserveCase) text.split("""[?!),.:'"]*\s+[('"]*""")
+        if(preserveCase) text.split("""[?!),.:'"]*(-)?\s+[('"]*""")
         else text.split("""('s)?[?!),.:'"]*\s+[('"]*""")
       val processedWords = if(preserveCase) rawWords else rawWords.map(_.toLowerCase)
       processedWords.foldLeft(Map.empty[String, Int])((counts, word) =>
