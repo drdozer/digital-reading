@@ -55,7 +55,9 @@ object CorpusBrowser {
           val sb = StoryBrowser(storyDB, stopWords, allMeanStdev, storyRx filter (_.isDefined) map (_.get))
           browser() = Some(sb.browser)
           browser()
-        case (Some(oldStory), Some(newStory)) if (oldStory != newStory) =>
+        case (Some(oldStory), Some(newStory)) if oldStory == newStory =>
+          browser()
+        case (Some(oldStory), Some(newStory)) if oldStory != newStory =>
           storyRx() = Some(newStory)
           browser()
         case (Some(oldStory), None) =>
