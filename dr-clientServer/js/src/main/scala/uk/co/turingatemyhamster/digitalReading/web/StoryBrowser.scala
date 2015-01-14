@@ -25,109 +25,107 @@ import JsDom.{svgTags => svg, svgAttrs => svga}
  *
  * @author Matthew Pocock
  */
-case class StoryBrowser(storyDB: StoryDB[Future],
-                        stopWords: Rx[Set[String]],
-                        allMeanStdev: Rx[MeanStdev],
+case class StoryBrowser(rawStatsDB: CorpusStatsDB,
+                        filteredStatsDB: CorpusStatsDB,
                         story: Rx[Story]) {
   import scala.scalajs.concurrent.JSExecutionContext.Implicits.runNow
 
-  val chapterWordCounts = Var(Left("Empty") : Either[String, List[WordCount]])
+  val rawFrequencies:       Var[Either[String, WordFrequency]] = Var(Left("Fetching"))
+  val filteredFrequencies:  Var[Either[String, WordFrequency]] = Var(Left("Fetching"))
+  val scaledBySupprise:     Var[Either[String, WordFrequency]] = Var(Left("Fetching"))
+  val stopFrames:           Var[Either[String, List[WordFrequency]]] = Var(Left("Fetching"))
+  
+//  val chapterWordCountWorker = Obs(chapterIds) {
+//    chapterWordCounts() = Left("Fetching")
+//    val lookups = for(cid <- chapterIds()) yield
+//      storyDB.chapterWordCounts(cid, false)
+//    Future.sequence(lookups).onComplete {
+//      case Success(wcs) =>
+//        chapterWordCounts() = Right(wcs)
+//      case Failure(t) =>
+//        chapterWordCounts() = Left("Error!")
+//        throw new IllegalStateException("Unable to fetch chapter word counts", t)
+//    }
+//  }
+//
+//  val storyWordCounts = Rx {
+//    
+//  }
+//
+//  val filteredByStopWords = Rx {
+//    storyWordCounts().right.map { swc =>
+//        val sws = stopWords()
+//        swc filter (w => !(sws contains w))
+//    }
+//  }
+//
+//  val storyWordFrequencies: Rx[Either[String, WordFrequency]] = Rx {
+//    storyWordCounts().right.map(_.asFrequencies)
+//  }
+//
+//  val filteredByStopWordsFrequencies = Rx {
+//    filteredByStopWords().right.map(_.asFrequencies)
+//  }
+//
+//  val scaledFrequencies = Rx {
+//    val ams = allMeanStdev()
+//
+//    if(ams.means.isEmpty) {
+//      Left("Calculating")
+//    } else {
+//      storyWordFrequencies().right.map { swf =>
+//        def scaleFactor(w: String) = {
+//          ams.means get w match {
+//            case Some(m) =>
+//              val s = ams.stdevs(w)
+//              val d = m - swf.frequencies(w)
+//              val d2 = d*d
+//              val s22 = 2 * s * s
+//
+//              1.0 - Math.exp(-d2 / s22)
+//            case None =>
+//              1.0
+//          }
+//        }
+//
+//        WordFrequency(swf.frequencies.map { case(w, f) =>
+//            w -> f * scaleFactor(w)
+//        }).normalize
+//      }
+//    }
+//  }
+//
+//  val stopFrames = Rx {
+//    for {
+//      sf <- scaledFrequencies().right
+//      swc <- storyWordCounts().right
+//      cc <- chapterWordCounts().right
+//    } yield {
+//      val rescaledChapterFreqs = cc map { cc_i =>
+//        WordFrequency(
+//          for((w, f) <- sf.frequencies)
+//          yield w -> (f * cc_i.counts.getOrElse(w, 0) * cc.length / swc.counts(w)))
+//      }
+//      sf +: rescaledChapterFreqs :+ sf
+//    }
+//  }
 
-  val chapterIds = Rx {
-    story().chapterIds
-  }
-
-  val chapterWordCountWorker = Obs(chapterIds) {
-    chapterWordCounts() = Left("Fetching")
-    val lookups = for(cid <- chapterIds()) yield
-      storyDB.chapterWordCounts(cid, false)
-    Future.sequence(lookups).onComplete {
-      case Success(wcs) =>
-        chapterWordCounts() = Right(wcs)
-      case Failure(t) =>
-        chapterWordCounts() = Left("Error!")
-        throw new IllegalStateException("Unable to fetch chapter word counts", t)
-    }
-  }
-
-  val storyWordCounts = Rx {
-    chapterWordCounts().right.map { _ reduce (_ merge _) }
-  }
-
-  val filteredByStopWords = Rx {
-    storyWordCounts().right.map { swc =>
-        val sws = stopWords()
-        swc filter (w => !(sws contains w))
-    }
-  }
-
-  val storyWordFrequencies: Rx[Either[String, WordFrequency]] = Rx {
-    storyWordCounts().right.map(_.asFrequencies)
-  }
-
-  val filteredByStopWordsFrequencies = Rx {
-    filteredByStopWords().right.map(_.asFrequencies)
-  }
-
-  val scaledFrequencies = Rx {
-    val ams = allMeanStdev()
-
-    if(ams.means.isEmpty) {
-      Left("Calculating")
-    } else {
-      storyWordFrequencies().right.map { swf =>
-        def scaleFactor(w: String) = {
-          ams.means get w match {
-            case Some(m) =>
-              val s = ams.stdevs(w)
-              val d = m - swf.frequencies(w)
-              val d2 = d*d
-              val s22 = 2 * s * s
-
-              1.0 - Math.exp(-d2 / s22)
-            case None =>
-              1.0
-          }
-        }
-
-        WordFrequency(swf.frequencies.map { case(w, f) =>
-            w -> f * scaleFactor(w)
-        }).normalize
-      }
-    }
-  }
-
-  val stopFrames = Rx {
-    for {
-      sf <- scaledFrequencies().right
-      swc <- storyWordCounts().right
-      cc <- chapterWordCounts().right
-    } yield {
-      val rescaledChapterFreqs = cc map { cc_i =>
-        WordFrequency(
-          for((w, f) <- sf.frequencies)
-          yield w -> (f * cc_i.counts.getOrElse(w, 0) * cc.length / swc.counts(w)))
-      }
-      sf +: rescaledChapterFreqs :+ sf
-    }
-  }
-
-  val allWordle = Wordle(storyWordFrequencies map {
+  val allWordle = Wordle(rawFrequencies map {
     case Left(l) => WordFrequency(Map(l -> 0.1))
     case Right(wf) => wf
   })
 
-  val filteredWordle = Wordle(filteredByStopWordsFrequencies map {
+  val filteredWordle = Wordle(filteredFrequencies map {
     case Left(l) => WordFrequency(Map(l -> 0.1))
     case Right(wf) => wf
   })
 
-  val scaledWordle = Wordle(scaledFrequencies map {
+  val scaledWordle = Wordle(scaledBySupprise map {
     case Left(l) => WordFrequency(Map(l -> 0.1))
     case Right(wf) => wf
   })
 
-  val animatedWordle = Wordle(scaledFrequencies map {
+  val animatedWordle = Wordle(scaledBySupprise map {
     case Left(l) => WordFrequency(Map(l -> 0.1))
     case Right(wf) => wf
   }, stopFrames = stopFrames map {

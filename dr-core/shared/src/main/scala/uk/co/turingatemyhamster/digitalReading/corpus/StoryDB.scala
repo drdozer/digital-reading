@@ -4,6 +4,8 @@ import java.util.Date
 
 import upickle._
 
+import scala.concurrent.Future
+
 object Helper {
   implicit class EnhancedReadWriter[A](val _rw: ReadWriter[A]) extends AnyVal {
     def compose[B](down: B => A, up: A => B): ReadWriter[B] = ReadWriter[B](
@@ -44,7 +46,12 @@ object Story {
   implicit val storyOrd: Ordering[Story] = Ordering.by(_.storyId)
 }
 
-case class MeanStdev(means: Map[String, Double], stdevs: Map[String, Double])
+case class MeanStdev(means: Map[String, Double], stdevs: Map[String, Double]) {
+  def filter(p: String => Boolean) = MeanStdev(
+    means = means filterKeys p,
+    stdevs = stdevs filterKeys p
+  )
+}
 
 object MeanStdev {
   def fromCounts(counts: List[WordCount]): MeanStdev = {
@@ -65,7 +72,9 @@ object MeanStdev {
   }
 }
 
-case class Stories(stories: List[Story])
+case class Stories(stories: List[Story]) {
+  lazy val byStoryId = stories.map(s => s.storyId -> s).toMap
+}
 
 case class WordCount(counts: Map[String, Int]) {
   def merge(wc: WordCount) = WordCount(
@@ -95,88 +104,143 @@ case class WordFrequency(frequencies: Map[String, Double]) {
   }
 }
 
-trait StoryDB[C[_]] {
-  def all: C[Stories]
-  def chapterText(chapterId: Long): C[String]
-  def storyWordCounts(storyId: Long, preserveCase: Boolean): C[WordCount]
-  def storyMeanStdev(storyId: Long): C[MeanStdev]
-  def chapterWordCounts(chapterId: Long, preserveCase: Boolean): C[WordCount]
-  def allWordCounts(preserveCase: Boolean): C[WordCount]
-  def allMeanStdev: C[MeanStdev]
+object FutureMemoiser {
+  def apply[A, B](f: A => Future[B]): A => Future[B] = {
+    val cache = scala.collection.concurrent.TrieMap.empty[A, Future[B]]
+
+    (a: A) => cache.getOrElseUpdate(a, f(a))
+  }
 }
 
-object StoryDB {
-  type Identity[T] = T
+trait StopWordsDB {
+  def words(): Future[Set[String]]
+}
 
-  def cache[C[_]](cached: StoryDB[C]): StoryDB[C] = new StoryDB[C] {
-    lazy val all = cached.all
+trait CachingStopWordsDB extends StopWordsDB {
+  def do_words: Future[Set[String]]
+  override final lazy val words = do_words
+}
 
-    private var chapterWordCounts_cache: Map[(Long, Boolean), C[WordCount]] = Map.empty
-    override def chapterWordCounts(chapterId: Long, preserveCase: Boolean) = {
-      val k = (chapterId, preserveCase)
-      chapterWordCounts_cache get k match {
-        case Some(v) => v
-        case None => cached.synchronized {
-          chapterWordCounts_cache get k match {
-            case Some(v) => v
-            case None =>
-              val v = cached.chapterWordCounts(chapterId, preserveCase)
-              chapterWordCounts_cache = chapterWordCounts_cache + (k -> v)
-              v
-          }
-        }
-      }
-    }
+object StopWordsDB {
+  def cache(stopWordsDB: StopWordsDB): StopWordsDB = new CachingStopWordsDB {
+    override def do_words = stopWordsDB.words
+  }
+}
 
-    private var chapterText_cache: Map[Long, C[String]] = Map.empty
-    override def chapterText(chapterId: Long) = {
-      if(!chapterText_cache.contains(chapterId)) {
-        chapterText_cache = chapterText_cache + (chapterId -> cached.chapterText(chapterId))
-      }
-      chapterText_cache(chapterId)
-    }
+/**
+ * A corpus as a textual artifact.
+ *
+ * @author Matthew Pocock
+ */
+trait CorpusDB {
+  /**
+   * A listing of all of the stories.
+   *
+   * note: this will not scale as the corpus scales
+   *
+   * @return  the Stories making up this corpus
+   */
+  def stories(): Future[Stories]
 
-    private var storyWordCounts_cache: Map[(Long, Boolean), C[WordCount]] = Map.empty
-    override def storyWordCounts(storyId: Long, preserveCase: Boolean) = {
-      val k = (storyId, preserveCase)
-      storyWordCounts_cache get k match {
-        case Some(v) => v
-        case None => cached.synchronized {
-          storyWordCounts_cache get k match {
-            case Some(v) => v
-            case None =>
-              val v = cached.storyWordCounts(storyId, preserveCase)
-              storyWordCounts_cache = storyWordCounts_cache + (k -> v)
-              v
-          }
-        }
-      }
-    }
+  /**
+   * Full-text of a chapter.
+   */
+  def chapterText(chapterId: Long): Future[String]
+}
 
-    private var storyMeanStdev_cache: Map[Long, C[MeanStdev]] = Map.empty
-    override def storyMeanStdev(storyId: Long) = {
-      val k = storyId
-      storyMeanStdev_cache get k match {
-        case Some(v) => v
-        case None => cached.synchronized {
-          storyMeanStdev_cache get k match {
-            case Some(v) => v
-            case None =>
-              val v = cached.storyMeanStdev(storyId)
-              storyMeanStdev_cache = storyMeanStdev_cache + (k -> v)
-              v
-          }
-        }
-      }
-    }
 
-    lazy val allWordCounts_cache_false = cached.allWordCounts(false)
-    lazy val allWordCounts_cache_true = cached.allWordCounts(true)
+trait CachingCorpusDB extends CorpusDB {
 
-    override def allWordCounts(preserveCase: Boolean) =
-      if(preserveCase) allWordCounts_cache_true
-      else allWordCounts_cache_false
+  protected def do_stories: Future[Stories]
+  final override lazy val stories = do_stories
 
-    lazy val allMeanStdev = cached.allMeanStdev
+  protected def do_chapterText(chapterId: Long): Future[String]
+  private val cache_chapterText = FutureMemoiser(do_chapterText)
+  final override def chapterText(chapterId: Long) = cache_chapterText(chapterId)
+
+}
+
+
+trait WordsDB {
+  /**
+   * The chapter text.
+   */
+  def chapterWords(chapterId: Long): Future[List[String]]
+}
+
+trait CachingWordsDB extends WordsDB {
+
+  protected def do_chapterWords(chapterId: Long): Future[List[String]]
+  private val cache_chapterWords = FutureMemoiser(do_chapterWords)
+  final override def chapterWords(chapterId: Long) = cache_chapterWords(chapterId)
+
+}
+
+
+
+object CorpusDB {
+  def cache(db: CorpusDB): CorpusDB = new CachingCorpusDB {
+    override def do_stories = db.stories
+    override def do_chapterText(chapterId: Long) = db.chapterText(chapterId)
+  }
+}
+
+trait CorpusStatsDB {
+  def corpusMeanStdev(): Future[MeanStdev]
+  def corpusRestrictedMeanStdev(storyId: Long): Future[MeanStdev]
+
+  def storyWordCounts(storyId: Long): Future[WordCount]
+  def storyWordFrequency(storyId: Long): Future[WordFrequency]
+  def storyMeanStdevByChapter(storyId: Long): Future[MeanStdev]
+
+  def chapterWordCounts(chapterId: Long): Future[WordCount]
+  def chapterWordFrequency(storyId: Long): Future[WordFrequency]
+}
+
+trait CachingCorpusStats extends CorpusStatsDB {
+
+  protected def do_corpusMeanStdev: Future[MeanStdev]
+  lazy val corpusMeanStdev = do_corpusMeanStdev
+
+  protected def do_corpusRestrictedMeanStdev(storyId: Long): Future[MeanStdev]
+  private val cache_corpusRestrictedMeanStdev = FutureMemoiser(do_corpusRestrictedMeanStdev)
+  final override def corpusRestrictedMeanStdev(storyId: Long) = cache_corpusRestrictedMeanStdev(storyId)
+
+
+  protected def do_storyWordCounts(storyId: Long): Future[WordCount]
+  private val cache_storyWordCounts = FutureMemoiser(do_storyWordCounts)
+  final override def storyWordCounts(storyId: Long) = cache_storyWordCounts(storyId)
+
+  protected def do_storyWordFrequency(storyId: Long): Future[WordFrequency]
+  private val cache_storyWordFrequency = FutureMemoiser(do_storyWordFrequency)
+  final override def storyWordFrequency(storyId: Long) = cache_storyWordFrequency(storyId)
+
+  protected def do_storyMeanStdevByChapter(storyId: Long): Future[MeanStdev]
+  private val cache_storyMeanStdevByChapter = FutureMemoiser(do_storyMeanStdevByChapter)
+  final override def storyMeanStdevByChapter(storyId: Long) = cache_storyMeanStdevByChapter(storyId)
+
+
+  protected def do_chapterWordCounts(chapterId: Long): Future[WordCount]
+  private val cache_chapterWordCounts = FutureMemoiser(do_chapterWordCounts)
+  final override def chapterWordCounts(chapterId: Long) = cache_chapterWordCounts(chapterId)
+
+  protected def do_chapterWordFrequency(chapterId: Long): Future[WordFrequency]
+  private val cache_chapterWordFrequency = FutureMemoiser(do_chapterWordFrequency)
+  final override def chapterWordFrequency(chapterId: Long) = cache_chapterWordFrequency(chapterId)
+
+}
+
+object CorpusStatsDB {
+  def cache(cs: CorpusStatsDB): CorpusStatsDB = new CachingCorpusStats {
+
+    final override protected def do_corpusMeanStdev = cs.corpusMeanStdev
+    final override protected def do_corpusRestrictedMeanStdev(storyId: Long) = cs.corpusRestrictedMeanStdev(storyId)
+
+    final override protected def do_storyWordCounts(storyId: Long) = cs.storyWordCounts(storyId)
+    final override protected def do_storyWordFrequency(storyId: Long) = cs.storyWordFrequency(storyId)
+    final override protected def do_storyMeanStdevByChapter(storyId: Long) = cs.storyMeanStdevByChapter(storyId)
+
+    final override protected def do_chapterWordCounts(chapterId: Long) = cs.chapterWordCounts(chapterId)
+    final override protected def do_chapterWordFrequency(chapterId: Long) = cs.chapterWordFrequency(chapterId)
   }
 }

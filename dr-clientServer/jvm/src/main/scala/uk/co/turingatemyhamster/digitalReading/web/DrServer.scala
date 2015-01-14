@@ -1,7 +1,6 @@
 package uk.co.turingatemyhamster.digitalReading.web
 
-import spray.routing.directives.OnSuccessFutureMagnet
-import uk.co.turingatemyhamster.digitalReading.corpus.{OnDiskStoryDB, StoryDB}
+import uk.co.turingatemyhamster.digitalReading.corpus._
 
 import scala.concurrent.ExecutionContext
 import akka.actor.ActorSystem
@@ -23,61 +22,93 @@ object DrServer extends App with SimpleRoutingApp with StaticContent with RestAp
 
   implicit val timeout: Timeout = Timeout(5 seconds)
 
-  override implicit val ec = ExecutionContext.Implicits.global
+  implicit val ec = ExecutionContext.Implicits.global
 
-  override val corpus = StoryDB.cache(OnDiskStoryDB(args.head))
+  def autowireService(router: AutowireServer.Router): spray.routing.Route = path(Segments) { s =>
+    extract(_.request.entity.asString) { e =>
+      complete {
+        router(
+          autowire.Core.Request(s, upickle.read[Map[String, String]](e)))
+      }
+    }
+  }
 
   println("Initializing corpus db")
-  corpus.allMeanStdev
-
-  println("Starting server")
-  startServer(interface = "0.0.0.0", port = 9300) {
-    get {
-      respondWithMediaType(MediaTypes.`text/html`) {
-        (path("index.html") | pathSingleSlash) {
-          complete {
-            index.render
+  val startup = for {
+    _ <- rawStatsDB.corpusMeanStdev
+    _ = println("Starting server")
+    serverStartup <- startServer(interface = "0.0.0.0", port = 9300) {
+      get {
+        respondWithMediaType(MediaTypes.`text/html`) {
+          (path("index.html") | pathSingleSlash) {
+            complete {
+              index.render
+            }
+          } ~
+            pathPrefix("digital_reading_proposal") {
+              pathEnd {
+                redirect("/digital_reading_proposal/", StatusCodes.PermanentRedirect)
+              } ~
+                (path("index.html") | pathSingleSlash) {
+                  complete(`digital_reading_proposal/index`.render)
+                } ~
+                path("wattpad100.html") {
+                  complete(`digital_reading_proposal/wattpad100`.render)
+                }
+            }
+        }
+      } ~
+        pathPrefix("public") {
+          get {
+            getFromResourceDirectory("public")
           }
         } ~
-          pathPrefix("digital_reading_proposal") {
-            pathEnd {
-              redirect("/digital_reading_proposal/", StatusCodes.PermanentRedirect)
-            } ~
-              (path("index.html") | pathSingleSlash) {
-                complete(`digital_reading_proposal/index`.render)
+        post {
+          pathPrefix("api") {
+            respondWithMediaType(MediaTypes.`application/json`) {
+              pathPrefix("stopWords") {
+                autowireService(AutowireServer.stopWordsDB)
               } ~
-              path("wattpad100.html") {
-                complete(`digital_reading_proposal/wattpad100`.render)
+              pathPrefix("corpus") {
+                autowireService(AutowireServer.corpusDB)
+              } ~
+              pathPrefix("rawWords") {
+                autowireService(AutowireServer.rawWordsDB)
+              } ~
+              pathPrefix("filteredWords") {
+                autowireService(AutowireServer.filteredWordsDB)
+              } ~
+              pathPrefix("rawStats") {
+                autowireService(AutowireServer.rawStatsDB)
+              } ~
+              pathPrefix("filteredStats") {
+                autowireService(AutowireServer.filteredStatsDB)
               }
-          }
-      } ~
-        pathPrefix("api") {
-          respondWithMediaType(MediaTypes.`application/json`) {
-            path("stories") {
-              complete(`api/stories`)
-            } ~
-              path("chapter_word_counts" / LongNumber / Segment ) { (chapterId: Long, preserveCase : String) =>
-                complete(`api/chapter_word_counts`(chapterId, preserveCase == "true"))
-              } ~
-              path("all_word_counts" / Segment) { (preserveCase: String) =>
-                complete(`api/all_word_counts`(preserveCase == "true"))
-              } ~
-              path("all_mean_stdev") {
-                complete(`api/all_mean_stdev`)
-              }
+            }
+
           }
         }
-    } ~
-      pathPrefix("public") {
-        get {
-          getFromResourceDirectory("public")
-        }
-      }
-  }.onComplete {
+    }
+  } yield serverStartup
+
+  startup.onComplete {
     case Success(b) =>
       println(s"Successfully bound to ${b.localAddress}")
     case Failure(ex) =>
       println(ex.getMessage)
       system.shutdown()
   }
+
+  override lazy val stopWordsDB = ResourceLinesStopWordsDB("/public/data/english.stopwords.txt")
+
+  lazy val corpusBaseDir = args.head
+  override lazy val corpusDB = OnDiskCorpusDB(corpusBaseDir)
+
+  override lazy val rawWordsDB = RawWordsDB(corpusDB)
+
+  override lazy val filteredWordsDB = FilteredWordsDB(rawWordsDB, stopWordsDB)
+
+  override lazy val rawStatsDB = CorpusStatsFromDB(corpusDB, rawWordsDB)
+
+  override lazy val filteredStatsDB = CorpusStatsFromDB(corpusDB, filteredWordsDB)
 }

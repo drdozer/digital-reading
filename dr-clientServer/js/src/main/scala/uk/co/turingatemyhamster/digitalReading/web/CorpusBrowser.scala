@@ -2,19 +2,18 @@ package uk.co.turingatemyhamster.digitalReading
 package web
 
 import corpus._
-import org.scalajs.dom.extensions.Ajax
+import org.scalajs.dom
 
-import org.scalajs.dom.{Element, Event, HTMLDivElement}
+import org.scalajs.dom.HTMLDivElement
 import rx._
 import rx.ops._
 
+import scala.concurrent.Future
 import scala.scalajs.js.annotation.JSExport
 import scala.util.{Failure, Success}
 import scalatags.JsDom
-import scalatags.ext.SeqDiff.Entered
 import scalatags.ext.{Updater, Framework}
 import JsDom.all._
-//import JsDom.attrs.{`class` => _, _}
 import Framework._
 import Updater._
 
@@ -26,10 +25,32 @@ import Updater._
 @JSExport(name = "CorpusBrowser")
 object CorpusBrowser {
   import scala.scalajs.concurrent.JSExecutionContext.Implicits.runNow
-  lazy val storyDB = StoryDB.cache(RemoteStoryDB())
+
+  case class AutowireClient(apiName: String) extends autowire.Client[String, upickle.Reader, upickle.Writer] {
+
+    override def doCall(req: Request): Future[String] = {
+      println(s"Servicing request $req")
+        dom.extensions.Ajax.post(
+          url = s"/api/$apiName/${req.path.mkString("/")}",
+          data = upickle.write(req.args)
+        ).map(_.responseText)
+      }
+
+    def read[Result: upickle.Reader](p: String) = upickle.read[Result](p)
+    def write[Result: upickle.Writer](r: Result) = upickle.write(r)
+  }
+
+  lazy val stopWords = AutowireClient("stopWords").apply[StopWordsDB]
+  lazy val corpus = AutowireClient("corpus").apply[CorpusDB]
+  lazy val rawWords = AutowireClient("rawWords").apply[WordsDB]
+  lazy val filteredWords = AutowireClient("filteredWords").apply[WordsDB]
+  lazy val rawStats = AutowireClient("rawStats").apply[CorpusStatsDB]
+  lazy val filteredStats = AutowireClient("filteredStats").apply[CorpusStatsDB]
 
   @JSExport
   def wire(corpusBrowser: HTMLDivElement, storyBrowser: HTMLDivElement): Unit = {
+
+    println("Wiring corpus browser")
 
     val stories = Var(IndexedSeq.empty[Story])
     val storyListing = StoryListing(stories)
@@ -37,11 +58,7 @@ object CorpusBrowser {
       title := "Select a story",
       storyListing.listing).render
 
-    val stopWords = Var(Set.empty[String])
-
-    val allMeanStdev = Var(MeanStdev(Map.empty, Map.empty))
-
-    def updateStoryBrowser: (Option[Story], Option[Story]) => Option[Frag] = {
+    def storyBrowserUpdater: (Option[Story], Option[Story]) => Option[Frag] = {
       val browser = Var(None : Option[Frag])
       val storyRx = Var(None : Option[Story])
 
@@ -52,7 +69,7 @@ object CorpusBrowser {
           None
         case (None, Some(story)) =>
           storyRx() = Some(story)
-          val sb = StoryBrowser(storyDB, stopWords, allMeanStdev, storyRx filter (_.isDefined) map (_.get))
+          val sb = StoryBrowser(rawStats, filteredStats, storyRx filter (_.isDefined) map (_.get))
           browser() = Some(sb.browser)
           browser()
         case (Some(oldStory), Some(newStory)) if oldStory == newStory =>
@@ -67,27 +84,17 @@ object CorpusBrowser {
       }
     }
 
-    storyBrowser.modifyWith(storyListing.selectedStory.diff[Option[Frag]] (updateStoryBrowser, _ => None)).render
+    storyBrowser.modifyWith(
+      storyListing.selectedStory.diff[Option[Frag]] (storyBrowserUpdater, _ => None)).render
 
-    storyDB.all onComplete {
+    corpus.stories() onComplete {
       case Success(s) =>
         stories() = s.stories.to[IndexedSeq]
       case Failure(t) =>
         throw new IllegalStateException("Unable to fetch all counts", t)
     }
 
-    storyDB.allMeanStdev onComplete {
-      case Success(s) =>
-        allMeanStdev() = s
-      case Failure(t) =>
-        throw new IllegalStateException("Unable to fetch all mean and stdev values", t)
-    }
-
-    Ajax.get("/public/data/english.stopwords.txt") map (_.responseText.split("\n").map(_.trim())) onComplete {
-      case Success(words) => stopWords() = words.to[Set]
-      case Failure(t) =>
-        throw new IllegalStateException("Unable to fetch stopwords", t)
-    }
+    println("Wired corpus browser")
   }
 
 }

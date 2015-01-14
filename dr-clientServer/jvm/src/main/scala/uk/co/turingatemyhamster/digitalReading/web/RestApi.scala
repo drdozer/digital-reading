@@ -1,10 +1,10 @@
 package uk.co.turingatemyhamster.digitalReading.web
 
-import uk.co.turingatemyhamster.digitalReading.corpus.{Stories, StoryDB}
+import uk.co.turingatemyhamster.digitalReading.corpus._
 
-import scala.concurrent.{ExecutionContext, Future}
-import scalatags.Text.all._
 import upickle._
+
+import scala.concurrent.ExecutionContext
 
 
 /**
@@ -14,14 +14,23 @@ import upickle._
  */
 trait RestApi {
   implicit def ec: ExecutionContext
-  def corpus: StoryDB[StoryDB.Identity]
 
-  def `api/stories` =
-    Future { write(corpus.all : Stories) }
-  def `api/chapter_word_counts`(chapterId: Long, preserveCase: Boolean) =
-    Future { write(corpus.chapterWordCounts(chapterId, preserveCase)) }
-  def `api/all_word_counts`(preserveCase: Boolean) =
-    Future { write(corpus.allWordCounts(preserveCase)) }
-  def `api/all_mean_stdev` =
-    Future { write(corpus.allMeanStdev) }
+  def stopWordsDB: StopWordsDB
+  def corpusDB: CorpusDB
+  def rawWordsDB: WordsDB
+  def filteredWordsDB: WordsDB
+  def rawStatsDB: CorpusStatsDB
+  def filteredStatsDB: CorpusStatsDB
+
+  object AutowireServer extends autowire.Server[String, upickle.Reader, upickle.Writer] {
+    def write[Result: Writer](r: Result) = upickle.write(r)
+    def read[Result: Reader](p: String) = upickle.read[Result](p)
+
+    val stopWordsDB       = route[StopWordsDB](RestApi.this.stopWordsDB)
+    val corpusDB          = route[CorpusDB](RestApi.this.corpusDB)
+    val rawWordsDB        = route[WordsDB](RestApi.this.rawWordsDB)
+    val filteredWordsDB   = route[WordsDB](RestApi.this.filteredWordsDB)
+    val rawStatsDB        = route[CorpusStatsDB](RestApi.this.rawStatsDB)
+    val filteredStatsDB   = route[CorpusStatsDB](RestApi.this.filteredStatsDB)
+  }
 }

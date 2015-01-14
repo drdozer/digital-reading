@@ -36,10 +36,11 @@ object DigitalReadingBuild extends Build {
   val drClientServer = XModule(id = "dr-clientServer", defaultSettings = buildSettings, baseDir = "dr-clientServer")
 
   lazy val clientServer             = drClientServer.project(clientServerPlatformJvm, clientServerPlatformJs)
-  lazy val clientServerPlatformJvm  = drClientServer.jvmProject(clientServerSharedJvm).dependsOn(corePlatformJvm).
-    enablePlugins(SbtWeb).
-    settings(clientServerPlatformJvmSettings : _*)
-  lazy val clientServerPlatformJs   = drClientServer.jsProject(clientServerSharedJs).dependsOn(corePlatformJs).settings(clientServerPlatformJsSettings : _*)
+  lazy val clientServerPlatformJvm  = drClientServer.jvmProject(clientServerSharedJvm).dependsOn(corePlatformJvm)
+    .enablePlugins(SbtWeb)
+    .settings(clientServerPlatformJvmSettings : _*)
+  lazy val clientServerPlatformJs   = drClientServer.jsProject(clientServerSharedJs).dependsOn(corePlatformJs)
+    .settings(clientServerPlatformJsSettings : _*)
   lazy val clientServerSharedJvm    = drClientServer.jvmShared().dependsOn(coreSharedJvm)
   lazy val clientServerSharedJs     = drClientServer.jsShared(clientServerSharedJvm).dependsOn(coreSharedJs)
 
@@ -98,14 +99,20 @@ object DigitalReadingBuild extends Build {
       "io.spray" %% "spray-routing" % "1.3.2",
       "io.spray" %% "spray-can" % "1.3.2",
       "com.scalatags" %% "scalatags" % "0.4.2",
+      "com.lihaoyi" %% "autowire" % "0.2.3",
       "com.typesafe.akka" %% "akka-actor" % "2.3.7"
     ),
     ScalaJSKeys.emitSourceMaps := true,
-    (crossTarget in (clientServerPlatformJs, Compile, fullOptJS)) := crossTarget.value / "classes" / "public" / "javascript",
+    (crossTarget in (clientServerPlatformJs, Compile, fastOptJS)) := crossTarget.value / "classes" / "public" / "javascript",
     (resources in Compile) += {
-      (fullOptJS in (clientServerPlatformJs, Compile)).value
-      (artifactPath in (clientServerPlatformJs, Compile, fullOptJS)).value
+      (fastOptJS in (clientServerPlatformJs, Compile)).value
+      (artifactPath in (clientServerPlatformJs, Compile, fastOptJS)).value
     },
+//    (crossTarget in (clientServerPlatformJs, Compile, fullOptJS)) := crossTarget.value / "classes" / "public" / "javascript",
+//    (resources in Compile) += {
+//      (fullOptJS in (clientServerPlatformJs, Compile)).value
+//      (artifactPath in (clientServerPlatformJs, Compile, fullOptJS)).value
+//    },
     includeFilter in (Assets, LessKeys.less) := "*.less",
     excludeFilter in (Assets, LessKeys.less) := "_*.less",
     WebKeys.packagePrefix in Assets := "public/",
@@ -114,6 +121,7 @@ object DigitalReadingBuild extends Build {
 
   lazy val clientServerPlatformJsSettings = Seq(
     libraryDependencies ++= Seq(
+      "com.lihaoyi" %%% "autowire" % "0.2.3"
     )
   )
 
