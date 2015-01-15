@@ -1,6 +1,9 @@
 package uk.co.turingatemyhamster.digitalReading
 package web
 
+import autowire._
+import uk.co.turingatemyhamster.digitalReading.web.CorpusBrowser.UpickleClientProxy
+import upickle._
 import corpus._
 
 import org.scalajs.dom.{Element, Event, HTMLDivElement}
@@ -25,90 +28,94 @@ import JsDom.{svgTags => svg, svgAttrs => svga}
  *
  * @author Matthew Pocock
  */
-case class StoryBrowser(rawStatsDB: CorpusStatsDB,
-                        filteredStatsDB: CorpusStatsDB,
+case class StoryBrowser(rawStatsDB: UpickleClientProxy[CorpusStatsDB],
+                        filteredStatsDB: UpickleClientProxy[CorpusStatsDB],
+                        surpriseDB: UpickleClientProxy[SurpriseDB],
                         story: Rx[Story]) {
   import scala.scalajs.concurrent.JSExecutionContext.Implicits.runNow
 
-  val rawFrequencies:       Var[Either[String, WordFrequency]] = Var(Left("Fetching"))
-  val filteredFrequencies:  Var[Either[String, WordFrequency]] = Var(Left("Fetching"))
-  val scaledBySupprise:     Var[Either[String, WordFrequency]] = Var(Left("Fetching"))
-  val stopFrames:           Var[Either[String, List[WordFrequency]]] = Var(Left("Fetching"))
-  
-//  val chapterWordCountWorker = Obs(chapterIds) {
-//    chapterWordCounts() = Left("Fetching")
-//    val lookups = for(cid <- chapterIds()) yield
-//      storyDB.chapterWordCounts(cid, false)
-//    Future.sequence(lookups).onComplete {
-//      case Success(wcs) =>
-//        chapterWordCounts() = Right(wcs)
-//      case Failure(t) =>
-//        chapterWordCounts() = Left("Error!")
-//        throw new IllegalStateException("Unable to fetch chapter word counts", t)
-//    }
-//  }
-//
-//  val storyWordCounts = Rx {
-//    
-//  }
-//
-//  val filteredByStopWords = Rx {
-//    storyWordCounts().right.map { swc =>
-//        val sws = stopWords()
-//        swc filter (w => !(sws contains w))
-//    }
-//  }
-//
-//  val storyWordFrequencies: Rx[Either[String, WordFrequency]] = Rx {
-//    storyWordCounts().right.map(_.asFrequencies)
-//  }
-//
-//  val filteredByStopWordsFrequencies = Rx {
-//    filteredByStopWords().right.map(_.asFrequencies)
-//  }
-//
-//  val scaledFrequencies = Rx {
-//    val ams = allMeanStdev()
-//
-//    if(ams.means.isEmpty) {
-//      Left("Calculating")
-//    } else {
-//      storyWordFrequencies().right.map { swf =>
-//        def scaleFactor(w: String) = {
-//          ams.means get w match {
-//            case Some(m) =>
-//              val s = ams.stdevs(w)
-//              val d = m - swf.frequencies(w)
-//              val d2 = d*d
-//              val s22 = 2 * s * s
-//
-//              1.0 - Math.exp(-d2 / s22)
-//            case None =>
-//              1.0
-//          }
-//        }
-//
-//        WordFrequency(swf.frequencies.map { case(w, f) =>
-//            w -> f * scaleFactor(w)
-//        }).normalize
-//      }
-//    }
-//  }
-//
-//  val stopFrames = Rx {
-//    for {
-//      sf <- scaledFrequencies().right
-//      swc <- storyWordCounts().right
-//      cc <- chapterWordCounts().right
-//    } yield {
-//      val rescaledChapterFreqs = cc map { cc_i =>
-//        WordFrequency(
-//          for((w, f) <- sf.frequencies)
-//          yield w -> (f * cc_i.counts.getOrElse(w, 0) * cc.length / swc.counts(w)))
-//      }
-//      sf +: rescaledChapterFreqs :+ sf
-//    }
-//  }
+  val rawFrequencies:       Var[Either[String, WordFrequency]] = Var(Left("No Data"))
+  val filteredFrequencies:  Var[Either[String, WordFrequency]] = Var(Left("No Data"))
+  val storySurprise:        Var[Either[String, WordWeight]] = Var(Left("No Data"))
+  val wordsByChapter:       Var[Either[String, WordProbabilities]] = Var(Left("No Data"))
+
+  val storyId = Rx {
+    story().storyId
+  }
+
+  val rawFrequencies_fetcher = Obs(storyId) {
+    rawFrequencies() = Left("Fetching")
+    val sid = storyId()
+    rawStatsDB.storyWordFrequency(sid).call().onComplete {
+      case Success(f) =>
+        rawFrequencies() = Right(f)
+      case Failure(t) =>
+        rawFrequencies() = Left("Error")
+        throw t
+    }
+  }
+
+  val filteredFrequencies_fetcher = Obs(storyId) {
+    filteredFrequencies() = Left("Fetching")
+    val sid = storyId()
+    filteredStatsDB.storyWordFrequency(sid).call().onComplete {
+      case Success(f) =>
+        filteredFrequencies() = Right(f)
+      case Failure(t) =>
+        filteredFrequencies() = Left("Error")
+        throw t
+    }
+  }
+
+  val scaledBySurprise_fetcher = Obs(storyId) {
+    storySurprise() = Left("Fetching")
+    val sid = storyId()
+    surpriseDB.storySurprise(sid).call().onComplete {
+      case Success(f) =>
+        storySurprise() = Right(f)
+      case Failure(t) =>
+        storySurprise() = Left("Error")
+        throw t
+    }
+  }
+
+  val wordsByChapter_Fetcher = Obs(story) {
+    wordsByChapter() = Left("Fetching")
+    val sid = storyId()
+    rawStatsDB.wordsByChapter(sid).call().onComplete {
+      case Success(fs) =>
+        wordsByChapter() = Right(fs)
+      case Failure(t) =>
+        wordsByChapter() = Left("Error")
+        throw t
+    }
+  }
+
+  val scaledBySurprise = Rx {
+    for {
+      s <- storySurprise().right
+      f <- rawFrequencies().right
+    } yield {
+      f rescaleBy s
+    }
+  }
+
+  val stopFrames = Rx {
+    for {
+      cs <- wordsByChapter().right
+      f <- scaledBySurprise().right
+    } yield {
+      println(s"the: ${f.frequencies.get("the")}")
+      for((cid, i) <- story().chapterIds.zipWithIndex) yield {
+        WordFrequency(
+          (for((w, v) <- f.frequencies) yield {
+            val ps = cs.probabilities(w)
+            w -> (v * ps(i) * ps.length.toDouble)
+          }).toMap
+        )
+      }
+    }
+  }
 
   val allWordle = Wordle(rawFrequencies map {
     case Left(l) => WordFrequency(Map(l -> 0.1))
@@ -120,12 +127,12 @@ case class StoryBrowser(rawStatsDB: CorpusStatsDB,
     case Right(wf) => wf
   })
 
-  val scaledWordle = Wordle(scaledBySupprise map {
+  val scaledWordle = Wordle(scaledBySurprise map {
     case Left(l) => WordFrequency(Map(l -> 0.1))
     case Right(wf) => wf
   })
 
-  val animatedWordle = Wordle(scaledBySupprise map {
+  val animatedWordle = Wordle(scaledBySurprise map {
     case Left(l) => WordFrequency(Map(l -> 0.1))
     case Right(wf) => wf
   }, stopFrames = stopFrames map {

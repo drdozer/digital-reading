@@ -83,6 +83,9 @@ object DrServer extends App with SimpleRoutingApp with StaticContent with RestAp
               } ~
               pathPrefix("filteredStats") {
                 autowireService(AutowireServer.filteredStatsDB)
+              } ~
+              pathPrefix("rawSurprise") {
+                autowireService(AutowireServer.rawSurpriseDB)
               }
             }
 
@@ -99,16 +102,25 @@ object DrServer extends App with SimpleRoutingApp with StaticContent with RestAp
       system.shutdown()
   }
 
-  override lazy val stopWordsDB = ResourceLinesStopWordsDB("/public/data/english.stopwords.txt")
+  override lazy val stopWordsDB = StopWordsDB.cache(
+    ResourceLinesStopWordsDB("/public/data/english.stopwords.txt"))
 
   lazy val corpusBaseDir = args.head
-  override lazy val corpusDB = OnDiskCorpusDB(corpusBaseDir)
+  override lazy val corpusDB = CorpusDB.cache(
+    OnDiskCorpusDB(corpusBaseDir))
 
-  override lazy val rawWordsDB = RawWordsDB(corpusDB)
+  override lazy val rawWordsDB = WordsDB.cache(
+    RawWordsDB(corpusDB))
 
-  override lazy val filteredWordsDB = FilteredWordsDB(rawWordsDB, stopWordsDB)
+  override lazy val filteredWordsDB = WordsDB.cache(
+    FilteredWordsDB(rawWordsDB, stopWordsDB))
 
-  override lazy val rawStatsDB = CorpusStatsFromDB(corpusDB, rawWordsDB)
+  override lazy val rawStatsDB = CorpusStatsDB.cache(
+    CorpusStatsFromDB(corpusDB, rawWordsDB))
 
-  override lazy val filteredStatsDB = CorpusStatsFromDB(corpusDB, filteredWordsDB)
+  override lazy val filteredStatsDB = CorpusStatsDB.cache(
+    CorpusStatsFromDB(corpusDB, filteredWordsDB))
+
+  override lazy val rawSurpriseDB = SurpriseDB.cache(
+    SurpriseFromStatsDB(rawStatsDB))
 }

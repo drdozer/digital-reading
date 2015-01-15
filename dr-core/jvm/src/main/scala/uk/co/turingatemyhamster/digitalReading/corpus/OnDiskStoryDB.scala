@@ -15,7 +15,7 @@ case class ResourceLinesStopWordsDB(resourceName: String)(implicit ec: Execution
   }
 }
 
-case class OnDiskCorpusDB(dirRoot: String)(implicit ec: ExecutionContext) extends CachingCorpusDB
+case class OnDiskCorpusDB(dirRoot: String)(implicit ec: ExecutionContext) extends CorpusDB.Caching
 {
   protected final override def do_stories = Future {
     val metaDataFile = dirRoot + "/metadata.csv"
@@ -38,42 +38,35 @@ case class OnDiskCorpusDB(dirRoot: String)(implicit ec: ExecutionContext) extend
   }
 }
 
-case class RawWordsDB(corpusDB: CorpusDB)(implicit ec: ExecutionContext) extends CachingWordsDB {
+case class RawWordsDB(corpusDB: CorpusDB)(implicit ec: ExecutionContext) extends WordsDB.Caching {
 
-  val wordPattern = """([^\s\.,?;:\=\-\*\^\\\/!']+)""".r
+  val wordPattern = """([^\s\.,?;:\[\]\{\}#\=\-\*\^\\\/!'"]+)""".r
   protected final override def do_chapterWords(chapterId: Long) =
     for(ct <- corpusDB.chapterText(chapterId)) yield
       (wordPattern findAllIn ct map (_.toLowerCase)).to[List]
 
 }
 
-case class FilteredWordsDB(rawWords: WordsDB, stopWordsDB: StopWordsDB)(implicit ec: ExecutionContext) extends CachingWordsDB {
+case class FilteredWordsDB(rawWords: WordsDB, stopWordsDB: StopWordsDB)(implicit ec: ExecutionContext) extends WordsDB.Caching {
 
   final protected override def do_chapterWords(chapterId: Long) =
     for {
-      cws <- chapterWords(chapterId)
-      sw <- stopWordsDB.words
-    } yield cws filter sw.contains
+      cws <- rawWords.chapterWords(chapterId)
+      sw <- stopWordsDB.words()
+    } yield cws filterNot sw.contains
 
 }
 
-case class CorpusStatsFromDB(corpusDB: CorpusDB, wordsDB: WordsDB)(implicit ec: ExecutionContext) extends CachingCorpusStats {
+case class CorpusStatsFromDB(corpusDB: CorpusDB, wordsDB: WordsDB)(implicit ec: ExecutionContext) extends CorpusStatsDB.Caching {
 
   final override protected def do_corpusMeanStdev =
     for {
-      stories <- corpusDB.stories
+      stories <- corpusDB.stories()
       cids = stories.stories.flatMap(_.chapterIds)
       counts <- Future.sequence(cids map chapterWordCounts)
     } yield {
       MeanStdev fromCounts counts
     }
-
-  final override protected def do_corpusRestrictedMeanStdev(storyId: Long) =
-    for {
-      cmsd <- corpusMeanStdev
-      swcs <- storyWordCounts(storyId)
-    } yield
-      cmsd filter swcs.counts.keySet.contains
 
 
   final override protected def do_chapterWordCounts(chapterId: Long) =
@@ -93,7 +86,7 @@ case class CorpusStatsFromDB(corpusDB: CorpusDB, wordsDB: WordsDB)(implicit ec: 
 
   final override protected def do_storyWordCounts(storyId: Long) =
     for {
-      stories <- corpusDB.stories
+      stories <- corpusDB.stories()
       cids = stories.byStoryId(storyId).chapterIds
       counts <- Future.sequence(cids.map(chapterWordCounts))
     } yield {
@@ -110,10 +103,58 @@ case class CorpusStatsFromDB(corpusDB: CorpusDB, wordsDB: WordsDB)(implicit ec: 
 
   final override protected def do_storyMeanStdevByChapter(storyId: Long) =
     for {
-      stories <- corpusDB.stories
+      stories <- corpusDB.stories()
       cids = stories.byStoryId(storyId).chapterIds
       counts <- Future.sequence(cids.map(chapterWordCounts))
     } yield {
       MeanStdev fromCounts counts
     }
+
+  final override protected def do_wordsByChapter(storyId: Long) =
+    for {
+      stories <- corpusDB.stories()
+      cids = stories.byStoryId(storyId).chapterIds
+      counts <- Future.sequence(cids.map(chapterWordCounts))
+    } yield {
+      WordProbabilities(
+        (
+          for(w <- counts.map(_.counts.keys).reduce(_ ++ _)) yield {
+            w -> {
+              val cs = counts map (_.counts.getOrElse(w, 0))
+              val s = cs.sum.toDouble
+              cs map (_.toDouble / s)
+            }
+          }
+          ).toMap)
+    }
+}
+
+case class SurpriseFromStatsDB(statsDB: CorpusStatsDB)(implicit ec: ExecutionContext) extends SurpriseDB {
+  override def storySurprise(storyId: Long) =
+    calculateSurprise(
+      statsDB.corpusMeanStdev(),
+      statsDB.storyWordFrequency(storyId))
+
+  override def chapterSurprise(chapterId: Long) =
+    calculateSurprise(
+      statsDB.corpusMeanStdev(),
+      statsDB.chapterWordFrequency(chapterId))
+
+  def calculateSurprise(msdF: Future[MeanStdev], freqsF: Future[WordFrequency]): Future[WordWeight] = {
+    for {
+      msd <- msdF
+      freqs <- freqsF
+    } yield {
+      WordWeight(freqs.frequencies.map {
+        case (k, v) =>
+          val m = msd.means(k)
+          val s = msd.stdevs(k)
+          val d = m - v
+          val d2 = d * d
+          val s22 = 2 * s * s
+
+          k -> (1.0 - Math.exp(-d2 / s22))
+      })
+    }
+  }
 }

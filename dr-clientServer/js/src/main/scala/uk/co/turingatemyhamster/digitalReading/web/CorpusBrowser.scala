@@ -16,6 +16,7 @@ import scalatags.ext.{Updater, Framework}
 import JsDom.all._
 import Framework._
 import Updater._
+import autowire._
 
 /**
  *
@@ -24,6 +25,8 @@ import Updater._
  */
 @JSExport(name = "CorpusBrowser")
 object CorpusBrowser {
+  type UpickleClientProxy[T] = autowire.ClientProxy[T, String, upickle.Reader, upickle.Writer]
+
   import scala.scalajs.concurrent.JSExecutionContext.Implicits.runNow
 
   case class AutowireClient(apiName: String) extends autowire.Client[String, upickle.Reader, upickle.Writer] {
@@ -46,6 +49,7 @@ object CorpusBrowser {
   lazy val filteredWords = AutowireClient("filteredWords").apply[WordsDB]
   lazy val rawStats = AutowireClient("rawStats").apply[CorpusStatsDB]
   lazy val filteredStats = AutowireClient("filteredStats").apply[CorpusStatsDB]
+  lazy val rawSurprise = AutowireClient("rawSurprise").apply[SurpriseDB]
 
   @JSExport
   def wire(corpusBrowser: HTMLDivElement, storyBrowser: HTMLDivElement): Unit = {
@@ -69,7 +73,7 @@ object CorpusBrowser {
           None
         case (None, Some(story)) =>
           storyRx() = Some(story)
-          val sb = StoryBrowser(rawStats, filteredStats, storyRx filter (_.isDefined) map (_.get))
+          val sb = StoryBrowser(rawStats, filteredStats, rawSurprise, storyRx filter (_.isDefined) map (_.get))
           browser() = Some(sb.browser)
           browser()
         case (Some(oldStory), Some(newStory)) if oldStory == newStory =>
@@ -87,7 +91,7 @@ object CorpusBrowser {
     storyBrowser.modifyWith(
       storyListing.selectedStory.diff[Option[Frag]] (storyBrowserUpdater, _ => None)).render
 
-    corpus.stories() onComplete {
+    corpus.stories().call() onComplete {
       case Success(s) =>
         stories() = s.stories.to[IndexedSeq]
       case Failure(t) =>

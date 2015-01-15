@@ -101,11 +101,12 @@ case class Wordle(frequencies: Rx[WordFrequency],
 
     def applyAnimations(): Unit = {
       if(frames.length > 2) {
-        val framePairs = (frames.head :: frames) zip frames
+        val framePairs = (frequencies() :: frequencies() :: frames) zip (frequencies() +: frames :+ frequencies())
         for (((fOld, fNew), i) <- framePairs.zipWithIndex) {
           for (w <- topNWords().map(_._1)) {
             val oldF = fOld.frequencies getOrElse (w, 0.0)
             val newF = fNew.frequencies getOrElse (w, 0.0)
+
             val text = dom.document.getElementById(textIdForWord(w)).asInstanceOf[SVGTextElement]
             val prevI = if(i == 0) framePairs.length - 1 else i - 1
             val afterPrevious = s"${animateIdForWord(w, prevI)}.end"
@@ -121,8 +122,7 @@ case class Wordle(frequencies: Rx[WordFrequency],
           val animId = animateIdForWord(w, 0)
           val zeroAnim = dom.document.getElementById(animId)
           Dynamic.global.window.requestAnimationFrame({() => {
-            println(s"Begin animation for $animId")
-            scala.scalajs.js.Dynamic(zeroAnim).beginElement()
+            scala.scalajs.js.Dynamic(zeroAnim).beginElementAt(0.5)
           }})
         }
       }
