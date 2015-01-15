@@ -103,16 +103,16 @@ object DigitalReadingBuild extends Build {
       "com.typesafe.akka" %% "akka-actor" % "2.3.7"
     ),
     ScalaJSKeys.emitSourceMaps := true,
-    (crossTarget in (clientServerPlatformJs, Compile, fastOptJS)) := crossTarget.value / "classes" / "public" / "javascript",
-    (resources in Compile) += {
-      (fastOptJS in (clientServerPlatformJs, Compile)).value
-      (artifactPath in (clientServerPlatformJs, Compile, fastOptJS)).value
-    },
-//    (crossTarget in (clientServerPlatformJs, Compile, fullOptJS)) := crossTarget.value / "classes" / "public" / "javascript",
+//    (crossTarget in (clientServerPlatformJs, Compile, fastOptJS)) := crossTarget.value / "classes" / "public" / "javascript",
 //    (resources in Compile) += {
-//      (fullOptJS in (clientServerPlatformJs, Compile)).value
-//      (artifactPath in (clientServerPlatformJs, Compile, fullOptJS)).value
+//      (fastOptJS in (clientServerPlatformJs, Compile)).value
+//      (artifactPath in (clientServerPlatformJs, Compile, fastOptJS)).value
 //    },
+    (crossTarget in (clientServerPlatformJs, Compile, fullOptJS)) := crossTarget.value / "classes" / "public" / "javascript",
+    (resources in Compile) += {
+      (fullOptJS in (clientServerPlatformJs, Compile)).value
+      (artifactPath in (clientServerPlatformJs, Compile, fullOptJS)).value
+    },
     includeFilter in (Assets, LessKeys.less) := "*.less",
     excludeFilter in (Assets, LessKeys.less) := "_*.less",
     WebKeys.packagePrefix in Assets := "public/",

@@ -25,8 +25,8 @@ trait StaticContent {
     )
 
   val `digital_reading_proposal/wattpad100` = mainTemplate("Wattpad100 Corpus")(
-//    script(src := "/public/javascript/dr-clientserver-opt.js", `type` := "text/javascript"),
-    script(src := "/public/javascript/dr-clientserver-fastopt.js", `type` := "text/javascript"),
+    script(src := "/public/javascript/dr-clientserver-opt.js", `type` := "text/javascript"),
+//    script(src := "/public/javascript/dr-clientserver-fastopt.js", `type` := "text/javascript"),
     h1("Wattpad100 Corups"),
     div(id := "corpusBrowser"),
     div(id := "storyBrowser"),
